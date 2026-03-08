@@ -1,0 +1,139 @@
+# system-meters 仕様書
+
+## 概要
+
+Windows 11 上で動作するシステムリソース監視 HUD アプリケーション。
+Direct2D で描画した常駐オーバーレイウィンドウに各種メトリクスをリアルタイム表示する。
+
+## ウィンドウ仕様
+
+| 項目 | 仕様 |
+|---|---|
+| スタイル | `WS_EX_TOPMOST` + `WS_EX_TOOLWINDOW`（常前面、タスクバー非表示） |
+| フレーム | 細いカスタムタイトルバー + 細いボーダー（Direct2D で自前描画） |
+| 配色 | ダーク系（濃いグレー背景 + オレンジ/緑/青系グラフ） |
+| 操作 | ドラッグ移動可能 |
+| トレイ | タスクトレイにアイコン表示（Shell_NotifyIcon） |
+| メニュー | タスクトレイ右クリック：設定ファイルを開く、終了 |
+| 権限 | **管理者権限必須**（CPU 温度 WMI アクセスに必要） |
+
+## メーター仕様
+
+### CPU
+
+| 要素 | 表示形式 |
+|---|---|
+| 全体使用率 | 塗りつぶし面グラフ（直近 60 秒）+ パーセンテージ数値 |
+| コア別使用率 | 16 本の縦バー横並び（0-100%、論理コア数） |
+| 温度 | 横バー（0-100°C）+ 数値（°C）、3段階色分け |
+
+データソース：PDH（使用率）、WMI `MSAcpi_ThermalZoneTemperature`（温度、管理者権限必須）
+
+### GPU
+
+| 要素 | 表示形式 |
+|---|---|
+| 使用率 | 塗りつぶし面グラフ（直近 60 秒）+ パーセンテージ数値 |
+| 温度 | 横バー（0-100°C）+ 数値（°C）、3段階色分け |
+
+データソース：NVML（動的ロード、GPU なし時は "N/A" 表示でクラッシュしない）
+
+### RAM
+
+| 要素 | 表示形式 |
+|---|---|
+| 使用率 | 横バー + パーセンテージ数値 |
+| 使用量 | 数値（例：24/64G） |
+
+データソース：GlobalMemoryStatusEx
+
+### VRAM
+
+| 要素 | 表示形式 |
+|---|---|
+| 使用率 | 塗りつぶし面グラフ（直近 60 秒）+ パーセンテージ数値 |
+| 使用量 | 数値（例：4/16G） |
+
+データソース：NVML
+
+### Disk I/O
+
+C: と D: パーティション別に以下を表示：
+
+| 要素 | 表示形式 |
+|---|---|
+| Read スループット | 塗りつぶし面グラフ（直近 60 秒）+ MB/s 数値 |
+| Write スループット | 塗りつぶし面グラフ（直近 60 秒）+ MB/s 数値 |
+
+データソース：PDH（`\LogicalDisk(C:)\Disk Read Bytes/sec` 等）
+
+### Network
+
+全 NIC 合算（PDH の `_Total` インスタンス）：
+
+| 要素 | 表示形式 |
+|---|---|
+| 送信スループット | 塗りつぶし面グラフ（直近 60 秒）+ KB/s or MB/s 数値（値に応じて単位自動切替） |
+| 受信スループット | 塗りつぶし面グラフ（直近 60 秒）+ KB/s or MB/s 数値 |
+
+データソース：PDH（`\Network Interface(*)\Bytes Sent/sec` 等）
+
+### Claude Code
+
+| 要素 | 表示形式 |
+|---|---|
+| 5h レートリミット | 横バー + パーセンテージ + リセット時刻（HH:MM JST） |
+| 7d レートリミット | 横バー + パーセンテージ + リセット時刻（M/D 曜 HH:MM JST） |
+| プラン名 | テキスト表示（例：Max5, Max20, Pro） |
+| セッション数 | 数値表示（実行中の claude.exe プロセス数） |
+
+データソース：Anthropic Usage API / Account API（OAuth トークン使用）
+
+## 温度バーの色分け
+
+| 温度範囲 | 色 |
+|---|---|
+| 0〜69°C | 緑系（正常） |
+| 70〜89°C | オレンジ系（注意） |
+| 90°C 以上 | 赤系（危険） |
+
+CPU・GPU 温度の両方に適用。
+
+## 更新仕様
+
+| 項目 | 値 |
+|---|---|
+| 高速ポーリング間隔 | 1.1 秒（CPU/GPU/Disk/Net/Claude） |
+| 低速ポーリング間隔 | 3.0 秒（RAM/VRAM） |
+| グラフ履歴 | 直近 60 ポイント（リングバッファ） |
+| Claude API キャッシュ（Usage） | 360 秒 |
+| Claude API キャッシュ（Plan） | 3600 秒 |
+
+## Claude API 仕様
+
+- **Usage API**：`https://api.anthropic.com/api/oauth/usage`
+- **Account API**：`https://api.anthropic.com/api/oauth/account`
+- **認証**：`Authorization: Bearer {token}` / `anthropic-beta: oauth-2025-04-20`
+- **トークン取得元**：`~/.claude/.credentials.json` の `claudeAiOauth.accessToken`
+- **キャッシュ保存先**：`$TEMP\claude-usage-cache.json`（Usage）、`$TEMP\claude-plan-cache.json`（Plan）
+- **API 呼び出し**：バックグラウンドスレッドで非同期実行（WinHTTP）
+
+## ビルド仕様
+
+| 項目 | 値 |
+|---|---|
+| コンパイラ | MSVC cl.exe（Visual Studio 2022 / Build Tools 2022） |
+| 言語標準 | C++20 |
+| コンパイルオプション | `/utf-8 /EHsc /std:c++20 /I include` |
+| リンクライブラリ | d2d1.lib, dwrite.lib, pdh.lib, winhttp.lib, windowscodecs.lib, wbemuuid.lib, ole32.lib, oleaut32.lib, shell32.lib |
+| サブシステム | `/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup` |
+| バージョン注入 | `/DAPP_VERSION=\"x.y.z\"` |
+| 出力先 | `out/system-meters.exe` |
+
+## 外部依存ライブラリ
+
+| ライブラリ | 用途 | 取得方法 |
+|---|---|---|
+| toml11（シングルヘッダ） | TOML 設定ファイルのパース | GitHub Releases |
+| nlohmann/json（シングルヘッダ） | Claude API レスポンスの JSON パース | GitHub Releases |
+| NVML（nvml.dll） | GPU/VRAM/温度取得 | NVIDIA ドライバ同梱（動的ロード） |

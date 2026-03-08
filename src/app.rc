@@ -1,0 +1,4 @@
+// vim: set ft=rc fenc=utf-8 ff=unix :
+#include "resource.h"
+
+IDI_APP_ICON ICON "app.ico"

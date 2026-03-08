@@ -1,0 +1,60 @@
+# vim: set ft=toml fenc=utf-8 ff=unix sw=4 ts=4 et :
+##################################################
+# system-meters 設定ファイル
+##################################################
+
+# ウィンドウ設定
+[window]
+# ウィンドウ初期表示位置 X 座標（ピクセル）
+# デフォルト: 20
+x = 20
+
+# ウィンドウ初期表示位置 Y 座標（ピクセル）
+# デフォルト: 20
+y = 20
+
+# ウィンドウ幅（ピクセル）
+# デフォルト: 500
+width = 500
+
+# 配色設定
+[color]
+# 背景色（RGB 16進数、例: 0x1A1A1A）
+# デフォルト: 0x1A1A1A（濃いグレー）
+background = 0x1A1A1A
+
+# ボーダー・タイトルバー色
+# デフォルト: 0x3C3C3C
+border = 0x3C3C3C
+
+# テキスト色
+# デフォルト: 0xD4D4D4
+text = 0xD4D4D4
+
+# 面グラフ色（CPU 全体 / GPU / VRAM）
+# デフォルト: 0xCC923E（アンバー）
+graph_fill = 0xCC923E
+
+# Disk Read グラフ色
+# デフォルト: 0xCCA366（明るいアンバー）
+disk_read = 0xCCA366
+
+# Disk Write グラフ色
+# デフォルト: 0xCC861E（暗めアンバー）
+disk_write = 0xCC861E
+
+# Network 受信グラフ色
+# デフォルト: 0xCCA366（明るいアンバー）
+net_recv = 0xCCA366
+
+# Network 送信グラフ色
+# デフォルト: 0xCC923E（アンバー）
+net_send = 0xCC923E
+
+# Claude レートリミットバー色
+# デフォルト: 0xCC923E（アンバー）
+claude_bar = 0xCC923E
+
+# CPU コア別縦バー色
+# デフォルト: 0xCC923E（アンバー）
+cpu_core = 0xCC923E

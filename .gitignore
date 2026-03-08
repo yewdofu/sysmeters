@@ -1,0 +1,10 @@
+out/
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.local.*
+include/toml.hpp
+include/json.hpp
+.clasp.json

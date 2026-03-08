@@ -1,0 +1,28 @@
+# vim: set ft=yaml fenc=utf-8 ff=unix sw=2 ts=2 et :
+version: "3"
+
+vars:
+  APP_NAME: system-meters
+  VERSION: 1.0.0
+  ARCH: x64
+
+tasks:
+  clean:
+    desc: out/ 以下のファイルを削除
+    cmds:
+      - cmd: pwsh.exe -NoProfile -Command "if (Test-Path out) { Remove-Item -Recurse -Force out }"
+
+  build:
+    desc: デバッグビルド（out/system-meters.exe）
+    cmds:
+      - cmd: pwsh.exe -NoProfile -File build.ps1 -Version "{{.VERSION}}" -Config Debug
+
+  release:
+    desc: リリースビルド + zip パッケージング
+    deps: [clean]
+    cmds:
+      - cmd: pwsh.exe -NoProfile -File build.ps1 -Version "{{.VERSION}}" -Config Release
+      - cmd: pwsh.exe -NoProfile -Command "
+          $zip = '{{.APP_NAME}}-{{.VERSION}}-{{.ARCH}}.zip';
+          Compress-Archive -Path 'out/{{.APP_NAME}}.exe','{{.APP_NAME}}.toml' -DestinationPath $zip -Force;
+          Write-Host \"Package: $zip\""

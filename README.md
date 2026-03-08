@@ -1,0 +1,54 @@
+# system-meters
+
+Windows 11 用リアルタイムシステムリソース監視 HUD アプリケーション。
+
+CPU、GPU、メモリ、ディスク I/O、ネットワーク通信量に加え、Claude Code のレートリミット使用状況をコンパクトなオーバーレイ GUI でモニタリングする。
+
+## 機能
+
+- **CPU**：全体使用率（面グラフ）+ 論理コア別使用率（縦バー 16 本）+ 温度（横バー）
+- **GPU**：使用率（面グラフ）+ 温度（横バー）、NVIDIA NVML 経由
+- **RAM**：使用率（横バー）+ 使用量/総量
+- **VRAM**：使用率（面グラフ）+ 使用量/総量、NVIDIA NVML 経由
+- **Disk I/O**：C: / D: パーティション別、Read/Write 分離（面グラフ + MB/s）
+- **Network**：全 NIC 合算、送信/受信分離（面グラフ + KB/s or MB/s）
+- **Claude Code**：5h / 7d レートリミット使用率（横バー）+ リセット時刻、セッション数
+
+Direct2D による GPU アクセラレーション描画で滑らかな表示を実現。
+
+## 動作要件
+
+- Windows 11（64bit）
+- **管理者権限**（CPU 温度取得に WMI アクセスが必要）
+- Visual Studio 2022 または Build Tools 2022（ビルド時のみ）
+- NVIDIA GPU（GPU/VRAM 監視はオプション、なくても動作する）
+- Claude Code を使用する場合：`~/.claude/.credentials.json` が存在すること
+
+## ビルド
+
+```powershell
+# 依存ライブラリの取得（初回のみ）
+pwsh.exe scripts/fetch-deps.ps1
+
+# ビルド
+task build
+
+# リリースビルド（zip パッケージング）
+task release
+```
+
+## 実行
+
+```
+out\system-meters.exe
+```
+
+タスクトレイ（通知領域）にアイコンが表示される。右クリックで設定ファイルを開くか終了できる。
+
+## 設定
+
+`system-meters.toml` で外観（背景色、グラフ色）等をカスタマイズできる。
+
+## スクリーンショット
+
+<!-- TODO: スクリーンショットを追加 -->
