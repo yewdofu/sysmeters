@@ -7,9 +7,10 @@
 #include <cwchar>
 
 // ウィンドウレイアウト定数（クライアント領域内）
-static constexpr float PAD        = 8.f;    // 内側パディング
+static constexpr float PAD        = 11.f;   // 内側パディング
 static constexpr float SECTION_H  = 24.f;   // セクションラベル高さ（18pt 対応）
 static constexpr float GRAPH_H    = 72.f;   // 面グラフ高さ（60 * 1.2）
+static constexpr float GRAPH_H_LG = 86.f;  // CPU/GPU 面グラフ高さ（72 * 1.2）
 static constexpr float BAR_H      = 16.f;   // 横バー高さ（20 * 0.8）
 static constexpr float CORE_BAR_H = 40.f;   // コア縦バー高さ
 static constexpr float LINE_H     = 30.f;   // 1行テキスト高さ（22pt 対応）
@@ -63,6 +64,13 @@ bool Renderer::init(HWND hwnd, const AppConfig& cfg) {
         DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
         22.f, L"ja-JP", &font_large_))) return false;
 
+    // CPU/GPU 使用率オーバーレイ用（33pt × 1.2 ≈ 40pt bold）
+    if (FAILED(dwrite_factory_->CreateTextFormat(L"Consolas", nullptr,
+        DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        40.f, L"ja-JP", &font_xlarge_))) return false;
+    // グラフ内のテキストを縦中央揃えにしてパーセンテージと温度のベースラインを揃える
+    font_xlarge_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
     create_device_resources(cfg);
     return true;
 }
@@ -101,6 +109,7 @@ void Renderer::shutdown() {
     safe_release(&font_normal_);
     safe_release(&font_small_);
     safe_release(&font_large_);
+    safe_release(&font_xlarge_);
     safe_release(&dwrite_factory_);
     safe_release(&d2d_factory_);
 }
@@ -108,6 +117,21 @@ void Renderer::shutdown() {
 // 指定色でブラシを使い回す（毎回 SetColor する）
 static void set_brush_color(ID2D1SolidColorBrush* b, uint32_t rgb, float alpha = 1.f) {
     b->SetColor(from_rgb(rgb, alpha));
+}
+
+void Renderer::draw_section_label_with_model(float x, float y, float ww,
+    const wchar_t* prefix, const char* model_name, const AppConfig& cfg) {
+    static constexpr float PREFIX_W = 55.f;
+    set_brush_color(brush_text_, cfg.col_text);
+    render_target_->DrawText(prefix, static_cast<UINT32>(wcslen(prefix)), font_normal_,
+        D2D1::RectF(x, y, x + PREFIX_W, y + SECTION_H), brush_text_);
+    if (model_name && model_name[0]) {
+        wchar_t lbl[48] = {};
+        mbstowcs_s(nullptr, lbl, model_name, _TRUNCATE);
+        set_brush_color(brush_text_, cfg.col_text, 0.6f);
+        render_target_->DrawText(lbl, static_cast<UINT32>(wcslen(lbl)), font_small_,
+            D2D1::RectF(x + PREFIX_W, y, x + ww, y + SECTION_H), brush_text_);
+    }
 }
 
 // セクションラベル描画（例："CPU"）
@@ -233,17 +257,20 @@ float Renderer::draw_cpu(const CpuMetrics& m, const AppConfig& cfg, float y) {
     float x  = PAD;
     float ww = static_cast<float>(cfg.win_width) - PAD * 2;
 
+    draw_section_label_with_model(x, y, ww, L"CPU", m.name, cfg);
+    y += SECTION_H;
+
     // 全体使用率 面グラフ（全幅）+ オーバーレイテキスト
     wchar_t buf[32];
-    D2D1_RECT_F gr = D2D1::RectF(x, y, x + ww, y + GRAPH_H);
+    D2D1_RECT_F gr = D2D1::RectF(x, y, x + ww, y + GRAPH_H_LG);
     draw_area_graph(m.total_history, 100.f, gr, cfg.col_graph_fill);
 
-    // パーセンテージ（左寄せ、95% 超で赤）
-    swprintf_s(buf, L"CPU  %4.1f%%", m.total_pct);
+    // パーセンテージ（左寄せ、95% 超で赤、font_xlarge_）
+    swprintf_s(buf, L"%4.1f%%", m.total_pct);
     uint32_t cpu_text_col = (m.total_pct > 95.f) ? 0xEF5350 : cfg.col_text;
     set_brush_color(brush_text_, cpu_text_col, 0.9f);
-    D2D1_RECT_F ol = D2D1::RectF(x + 4.f, y + 4.f, x + ww - 4.f, y + GRAPH_H - 4.f);
-    render_target_->DrawText(buf, static_cast<UINT32>(wcslen(buf)), font_large_, ol, brush_text_);
+    D2D1_RECT_F ol = D2D1::RectF(x + 4.f, y + 4.f, x + ww - 4.f, y + GRAPH_H_LG - 4.f);
+    render_target_->DrawText(buf, static_cast<UINT32>(wcslen(buf)), font_xlarge_, ol, brush_text_);
 
     // 温度（右寄せ、3 段階色。取得不可時は "--℃"）
     wchar_t tbuf[16];
@@ -259,7 +286,7 @@ float Renderer::draw_cpu(const CpuMetrics& m, const AppConfig& cfg, float y) {
     render_target_->DrawText(tbuf, static_cast<UINT32>(wcslen(tbuf)), font_large_, ol, brush_text_);
     font_large_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
 
-    y += GRAPH_H + GAP;
+    y += GRAPH_H_LG + GAP;
 
     // コア別縦バー（論理コア数本横並び、画面幅に合わせて動的計算）
     {
@@ -283,9 +310,10 @@ float Renderer::draw_gpu(const GpuMetrics& m, const AppConfig& cfg, float y) {
     float x  = PAD;
     float ww = static_cast<float>(cfg.win_width) - PAD * 2;
 
+    draw_section_label_with_model(x, y, ww, L"GPU", m.name, cfg);
+    y += SECTION_H;
+
     if (!m.avail) {
-        draw_section_label(x, y, L"GPU", cfg);
-        y += SECTION_H;
         set_brush_color(brush_text_, 0x888888);
         D2D1_RECT_F r = D2D1::RectF(x, y, x + ww, y + LINE_H);
         render_target_->DrawText(L"N/A", 3, font_normal_, r, brush_text_);
@@ -294,15 +322,15 @@ float Renderer::draw_gpu(const GpuMetrics& m, const AppConfig& cfg, float y) {
 
     // 使用率 面グラフ（全幅）+ オーバーレイテキスト
     wchar_t buf[32];
-    D2D1_RECT_F gr = D2D1::RectF(x, y, x + ww, y + GRAPH_H);
+    D2D1_RECT_F gr = D2D1::RectF(x, y, x + ww, y + GRAPH_H_LG);
     draw_area_graph(m.usage_history, 100.f, gr, cfg.col_graph_fill);
 
-    // パーセンテージ（左寄せ、95% 超で赤）
-    swprintf_s(buf, L"GPU  %4.1f%%", m.usage_pct);
+    // パーセンテージ（左寄せ、95% 超で赤、font_xlarge_）
+    swprintf_s(buf, L"%4.1f%%", m.usage_pct);
     uint32_t gpu_text_col = (m.usage_pct > 95.f) ? 0xEF5350 : cfg.col_text;
     set_brush_color(brush_text_, gpu_text_col, 0.9f);
-    D2D1_RECT_F ol = D2D1::RectF(x + 4.f, y + 4.f, x + ww - 4.f, y + GRAPH_H - 4.f);
-    render_target_->DrawText(buf, static_cast<UINT32>(wcslen(buf)), font_large_, ol, brush_text_);
+    D2D1_RECT_F ol = D2D1::RectF(x + 4.f, y + 4.f, x + ww - 4.f, y + GRAPH_H_LG - 4.f);
+    render_target_->DrawText(buf, static_cast<UINT32>(wcslen(buf)), font_xlarge_, ol, brush_text_);
 
     // 温度（右寄せ、3 段階色）
     wchar_t tbuf[16];
@@ -312,7 +340,7 @@ float Renderer::draw_gpu(const GpuMetrics& m, const AppConfig& cfg, float y) {
     render_target_->DrawText(tbuf, static_cast<UINT32>(wcslen(tbuf)), font_large_, ol, brush_text_);
     font_large_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
 
-    y += GRAPH_H + GAP;
+    y += GRAPH_H_LG + GAP;
 
     return y;
 }
@@ -321,48 +349,46 @@ float Renderer::draw_mem(const MemMetrics& m, const AppConfig& cfg, float y) {
     float x  = PAD;
     float ww = static_cast<float>(cfg.win_width) - PAD * 2;
 
-    // RAM テキスト（90% 超で赤、WSL 使用中なら WSL 量を追記）
-    // "RAM   " = 6 文字幅、"VRAM  " = 6 文字幅 → パーセンテージの縦位置を揃える
-    wchar_t buf[64];
-    if (m.wsl_gb > 0.f)
-        swprintf_s(buf, L"RAM   %5.1f%%  %5.1fGB  WSL %4.1fGB", m.usage_pct, m.used_gb, m.wsl_gb);
-    else
-        swprintf_s(buf, L"RAM   %5.1f%%  %5.1fGB", m.usage_pct, m.used_gb);
+    // RAM テキスト（使用率は font_normal_ 左寄せ、GB は font_small_ 右寄せ）
     uint32_t ram_col = (m.usage_pct > 90.f) ? 0xEF5350 : cfg.col_text;
+    wchar_t buf[64];
+    swprintf_s(buf, L"RAM   %5.1f%%", m.usage_pct);
     set_brush_color(brush_text_, ram_col);
     D2D1_RECT_F tr = D2D1::RectF(x, y, x + ww, y + LINE_H);
     render_target_->DrawText(buf, static_cast<UINT32>(wcslen(buf)), font_normal_, tr, brush_text_);
+
+    // 使用 GB（右寄せ）
+    wchar_t gbuf[16];
+    swprintf_s(gbuf, L"%5.1fGB", m.used_gb);
+    set_brush_color(brush_text_, ram_col, 0.8f);
+    font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+    render_target_->DrawText(gbuf, static_cast<UINT32>(wcslen(gbuf)), font_small_, tr, brush_text_);
+
+    // WSL 使用量（中央、WSL 使用時のみ）
+    if (m.wsl_gb > 0.f) {
+        wchar_t wslbuf[24];
+        swprintf_s(wslbuf, L"WSL %4.1fGB", m.wsl_gb);
+        font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        render_target_->DrawText(wslbuf, static_cast<UINT32>(wcslen(wslbuf)), font_small_, tr, brush_text_);
+    }
+
+    font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
     y += LINE_H + 2.f;
 
-    // バー右側に総量テキスト（font_small_ で右寄せ）
+    // RAM バー：全体使用量を通常色で描画し、WSL 分を同系色の濃いオーバーレイで重ねる
     D2D1_RECT_F br = D2D1::RectF(x, y, x + ww - TOTAL_W - 4.f, y + BAR_H);
     uint32_t bar_col = (m.usage_pct > 90.f) ? 0xEF5350 : cfg.col_graph_fill;
+    draw_hbar(m.usage_pct, 100.f, br, bar_col);
 
     if (m.wsl_gb > 0.f && m.total_gb > 0.f) {
-        // 2 色バー：左端から WSL 分を青、残りの使用分をアンバーで描画
-        float bar_w      = br.right - br.left;
-        float total_fill = min(m.usage_pct / 100.f, 1.f) * bar_w;
-        // wsl_fill は total_fill を超えないようクランプ（計算基準の違いによる視覚矛盾を防止）
-        float wsl_fill   = min(min(m.wsl_gb / m.total_gb, 1.f) * bar_w, total_fill);
-        // 90% 超の警告時は WSL バーも赤にして警告を隠さない
-        uint32_t wsl_col = (m.usage_pct > 90.f) ? 0xEF5350 : 0x42A5F5;
-
-        set_brush_color(brush_fill_, 0x2A2A2A);
-        render_target_->FillRectangle(br, brush_fill_);
-
-        if (total_fill > 0.f) {
-            D2D1_RECT_F r = D2D1::RectF(br.left, br.top, br.left + total_fill, br.bottom);
-            set_brush_color(brush_fill_, bar_col);
-            render_target_->FillRectangle(r, brush_fill_);
-        }
+        // WSL 使用量を同系色（alpha 上げた重ね塗り）で内訳表示
+        float bar_w    = br.right - br.left;
+        float wsl_fill = min(m.wsl_gb / m.total_gb, 1.f) * bar_w;
         if (wsl_fill > 0.f) {
-            D2D1_RECT_F r = D2D1::RectF(br.left, br.top, br.left + wsl_fill, br.bottom);
-            set_brush_color(brush_fill_, wsl_col);
-            render_target_->FillRectangle(r, brush_fill_);
+            D2D1_RECT_F wr = D2D1::RectF(br.left, br.top, br.left + wsl_fill, br.bottom);
+            set_brush_color(brush_fill_, 0xFFFFFF, 0.25f);
+            render_target_->FillRectangle(wr, brush_fill_);
         }
-    }
-    else {
-        draw_hbar(m.usage_pct, 100.f, br, bar_col);
     }
 
     // 総量テキストをバー右側に表示（棒グラフと縦位置を合わせるため上にシフト）
@@ -390,14 +416,22 @@ float Renderer::draw_vram(const VramMetrics& m, const AppConfig& cfg, float y) {
         return y + LINE_H + GAP;
     }
 
-    // VRAM テキスト（90% 超で赤）
-    // "VRAM  " = 6 文字幅 → RAM の "RAM   " と揃える
-    wchar_t buf[64];
-    swprintf_s(buf, L"VRAM  %5.1f%%  %5.1fGB", m.usage_pct, m.used_gb);
+    // VRAM テキスト（使用率は font_normal_ 左寄せ、GB は font_small_ 右寄せ）
     uint32_t vram_col = (m.usage_pct > 90.f) ? 0xEF5350 : cfg.col_text;
+    wchar_t buf[64];
+    swprintf_s(buf, L"VRAM  %5.1f%%", m.usage_pct);
     set_brush_color(brush_text_, vram_col);
     D2D1_RECT_F tr = D2D1::RectF(x, y, x + ww, y + LINE_H);
     render_target_->DrawText(buf, static_cast<UINT32>(wcslen(buf)), font_normal_, tr, brush_text_);
+
+    // GB 表示（右寄せ、font_small_）
+    wchar_t gbuf[16];
+    swprintf_s(gbuf, L"%5.1fGB", m.used_gb);
+    set_brush_color(brush_text_, vram_col, 0.8f);
+    font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+    render_target_->DrawText(gbuf, static_cast<UINT32>(wcslen(gbuf)), font_small_, tr, brush_text_);
+    font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+
     y += LINE_H + 2.f;
 
     D2D1_RECT_F br = D2D1::RectF(x, y, x + ww - TOTAL_W - 4.f, y + BAR_H);
@@ -497,33 +531,45 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
 
     wchar_t hdr[48];
     swprintf_s(hdr, L"%.15hs  Sessions: %d", m.plan_label, m.session_count);
-    D2D1_RECT_F hsr = D2D1::RectF(x + CLAUDE_LBL_W, y, x + ww, y + LINE_H);
+    D2D1_RECT_F hsr = D2D1::RectF(x + CLAUDE_LBL_W, y + 4.f, x + ww, y + LINE_H);
     render_target_->DrawText(hdr, static_cast<UINT32>(wcslen(hdr)), font_small_, hsr, brush_text_);
     y += LINE_H;
 
     // 5h / 7d バー：ラベル+パーセンテージ（左）、バー（中）、リセット時刻（右）の同一行レイアウト
     // テキストは Disk I/O と同じ font_small_（18pt）
     static constexpr float LBL_W   = 90.f;   // "5h 100.0%" が収まる幅（font_small_）
-    static constexpr float RESET_W = 110.f;  // リセット時刻テキスト幅
-    auto draw_bar = [&](const wchar_t* lbl, float pct, const char* reset, bool avail) {
+    static constexpr float RESET_W = 130.f;  // リセット時刻テキスト幅（"12/31 月 23:59" が収まる幅）
+    auto draw_bar = [&](const wchar_t* lbl, float pct, const wchar_t* reset, bool avail,
+                         float expected_pct, int tick_count) {
         // ラベル + パーセンテージ（左寄せ、font_small_ = Disk I/O と同サイズ）
         wchar_t buf[64];
         if (avail) swprintf_s(buf, L"%s %5.1f%%", lbl, pct);
         else       swprintf_s(buf, L"%s   N/A",   lbl);
-        set_brush_color(brush_text_, avail ? cfg.col_text : 0x888888);
+        uint32_t text_col = (avail && pct > expected_pct * 1.1f) ? 0xEF5350 : (avail ? cfg.col_text : 0x888888);
+        set_brush_color(brush_text_, text_col);
         D2D1_RECT_F lr = D2D1::RectF(x, y, x + LBL_W, y + SECTION_H);
         render_target_->DrawText(buf, static_cast<UINT32>(wcslen(buf)), font_small_, lr, brush_text_);
 
         // バー（ラベル右端からリセット時刻左端まで）
-        float bar_right = avail ? (x + ww - RESET_W - 4.f) : (x + ww);
+        float bar_right = avail ? (x + ww - RESET_W) : (x + ww);
         float bar_top   = y + (SECTION_H - BAR_H) / 2.f;  // 行内で縦中央揃え
         D2D1_RECT_F br  = D2D1::RectF(x + LBL_W + 4.f, bar_top, bar_right, bar_top + BAR_H);
         draw_hbar(avail ? pct : 0.f, 100.f, br, cfg.col_claude_bar);
 
+        // 等分グリッド線（消費ペースの目安：5h は 1h 間隔、7d は 1d 間隔）
+        float bar_w = br.right - br.left;
+        set_brush_color(brush_fill_, 0xFFFFFF, 0.4f);
+        for (int i = 1; i < tick_count; ++i) {
+            float gx = br.left + bar_w * (static_cast<float>(i) / tick_count);
+            render_target_->DrawLine(
+                D2D1::Point2F(gx, br.top), D2D1::Point2F(gx, br.bottom),
+                brush_fill_, 1.0f);
+        }
+
         // リセット時刻（右端、未取得時は非表示、font_small_）
         if (avail) {
             wchar_t rtbuf[40];
-            swprintf_s(rtbuf, L"%.38hs", reset);
+            swprintf_s(rtbuf, L"%.38s", reset);
             set_brush_color(brush_text_, cfg.col_text, 0.6f);
             D2D1_RECT_F rr = D2D1::RectF(x + ww - RESET_W, y, x + ww, y + SECTION_H);
             font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
@@ -533,8 +579,8 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         y += SECTION_H + GAP;
     };
 
-    draw_bar(L"5h", m.five_h_pct,  m.five_h_reset,  m.avail);
-    draw_bar(L"7d", m.seven_d_pct, m.seven_d_reset, m.avail);
+    draw_bar(L"5h", m.five_h_pct,  m.five_h_reset,  m.avail, m.five_h_expected_pct,  5);
+    draw_bar(L"7d", m.seven_d_pct, m.seven_d_reset, m.avail, m.seven_d_expected_pct, 7);
 
     return y;
 }

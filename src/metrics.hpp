@@ -11,6 +11,7 @@ struct CpuMetrics {
     float core_pct[16] = {};             // 論理コア別使用率（%）
     float temp_celsius = 0.f;           // CPU 温度
     bool  temp_avail   = false;         // WMI 温度取得成功フラグ
+    char  name[48]     = {};            // CPU ブランド名（CPUID 取得）
 };
 
 // GPU：使用率（面グラフ）+ 温度（横バー）
@@ -19,6 +20,7 @@ struct GpuMetrics {
     float usage_pct    = 0.f;
     float temp_celsius = 0.f;
     bool  avail        = false;         // NVML ロード成功フラグ
+    char  name[48]     = {};            // GPU 名（NVML 取得）
 };
 
 // RAM：横バー + 使用量表示
@@ -59,9 +61,11 @@ struct NetMetrics {
 struct ClaudeMetrics {
     float five_h_pct    = 0.f;
     float seven_d_pct   = 0.f;
-    char  five_h_reset[20]  = {};        // "HH:MM" 形式
-    char  seven_d_reset[32] = {};        // "M/D 曜 HH:MM" 形式
-    char  plan_label[16]    = {};        // "Max5", "Pro" 等
+    wchar_t five_h_reset[20]  = {};      // L"HH:MM" 形式
+    wchar_t seven_d_reset[32] = {};      // L"M/D 曜 HH:MM" 形式
+    float five_h_expected_pct  = 0.f;   // 5h ウィンドウの均等消費ペース（%）
+    float seven_d_expected_pct = 0.f;   // 7d ウィンドウの均等消費ペース（%）
+    char  plan_label[16]    = {};       // "Max5", "Pro" 等
     int   session_count = 0;
     bool  avail         = false;
 };

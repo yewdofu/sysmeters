@@ -72,8 +72,8 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     wc.hbrBackground = nullptr;
     if (!RegisterClassExW(&wc)) return false;
 
-    // 初期クライアントサイズ(win_width × 600)からウィンドウ全体サイズを計算
-    RECT adj = {0, 0, cfg_->win_width, 600};
+    // 初期クライアントサイズ(win_width × 750)からウィンドウ全体サイズを計算
+    RECT adj = {0, 0, cfg_->win_width, 750};
     AdjustWindowRectEx(&adj, WND_STYLE, FALSE, WND_EX_STYLE);
 
     // ウィンドウ作成（標準タイトルバー＋閉じるボタン、常前面、タスクバー非表示）
@@ -146,6 +146,12 @@ void AppWindow::update_window_size() {
     RECT adj = {0, 0, cfg_->win_width, client_h};
     AdjustWindowRectEx(&adj, WND_STYLE, FALSE, WND_EX_STYLE);
     int full_h = adj.bottom - adj.top;
+
+    // 作業領域を超えないようクランプ
+    RECT work;
+    SystemParametersInfo(SPI_GETWORKAREA, 0, &work, 0);
+    int max_h = work.bottom - work.top;
+    if (full_h > max_h) full_h = max_h;
 
     RECT rc;
     GetWindowRect(hwnd_, &rc);

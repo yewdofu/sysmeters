@@ -35,19 +35,19 @@ private:
     ID2D1Factory*          d2d_factory_    = nullptr;
     ID2D1HwndRenderTarget* render_target_  = nullptr;
     IDWriteFactory*        dwrite_factory_ = nullptr;
-    IDWriteTextFormat*     font_normal_    = nullptr;  // 通常テキスト
-    IDWriteTextFormat*     font_small_     = nullptr;  // 小テキスト（コア別等）
-    IDWriteTextFormat*     font_large_     = nullptr;  // グラフ内オーバーレイ（大）
+    IDWriteTextFormat*     font_normal_    = nullptr;  // 通常テキスト（22pt）
+    IDWriteTextFormat*     font_small_     = nullptr;  // 小テキスト（18pt）
+    IDWriteTextFormat*     font_large_     = nullptr;  // グラフ内オーバーレイ（22pt bold）
+    IDWriteTextFormat*     font_xlarge_    = nullptr;  // CPU/GPU 使用率オーバーレイ（33pt bold）
 
     // ブラシキャッシュ（色別に使い回す）
     ID2D1SolidColorBrush*  brush_text_  = nullptr;
     ID2D1SolidColorBrush*  brush_fill_  = nullptr;  // 汎用（後で色を変えて使う）
 
-    int preferred_h_ = 600;
+    int preferred_h_ = 750;
 
     void create_device_resources(const AppConfig& cfg);
     void release_device_resources();
-
 
     // 描画プリミティブ
     void draw_section_label(float x, float y, const wchar_t* label, const AppConfig& cfg);
@@ -67,6 +67,10 @@ private:
 
     // 温度色（3段階）を返す
     static uint32_t temp_color(float celsius);
+
+    // セクション名（"CPU"/"GPU"）+ モデル名の 2 段階ラベル描画
+    void draw_section_label_with_model(float x, float y, float ww,
+        const wchar_t* prefix, const char* model_name, const AppConfig& cfg);
 
     // メーター各セクションの描画
     float draw_cpu(const CpuMetrics& m, const AppConfig& cfg, float y);

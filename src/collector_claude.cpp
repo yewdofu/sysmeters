@@ -14,6 +14,7 @@
 #include <fstream>
 #include <sstream>
 #include <filesystem>
+#include <algorithm>
 #include <chrono>
 #include <ctime>
 #include <cstring>
@@ -122,41 +123,63 @@ static std::string http_get(const std::wstring& host, const std::wstring& path,
     return body;
 }
 
-// ISO 8601 UTC 日時文字列（例: "2025-03-08T14:30:00Z"）を JST に変換して表示文字列に変換する
+// ISO 8601 UTC 日時文字列（例: "2025-03-08T14:30:00Z"）を UTC time_t に変換する
 //
-// _mkgmtime で UTC time_t を求め +9h してから gmtime_s で JST broken-down time を得る。
-// mktime（ローカル時刻解釈）を避けることで月またぎ・年またぎを正確に処理する。
-static void format_reset_time(const std::string& iso, bool include_date, char* out, int out_len) {
-    if (iso.empty()) { snprintf(out, out_len, "-"); return; }
-
-    // 簡易パース: "YYYY-MM-DDTHH:MM:SSZ" 形式
+// "YYYY-MM-DDTHH:MM:SS" までをパースし _mkgmtime で UTC time_t を返す。
+// パース失敗または変換エラーの場合は -1 を返す。
+static time_t parse_iso8601_utc(const std::string& iso) {
+    if (iso.empty()) return -1;
     int year, mon, day, hour, min, sec;
-    if (sscanf_s(iso.c_str(), "%d-%d-%dT%d:%d:%d", &year, &mon, &day, &hour, &min, &sec) < 6) {
-        snprintf(out, out_len, "-"); return;
-    }
-
-    // UTC tm → UTC time_t（_mkgmtime はローカル時刻と解釈しない）
+    if (sscanf_s(iso.c_str(), "%d-%d-%dT%d:%d:%d", &year, &mon, &day, &hour, &min, &sec) < 6)
+        return -1;
     struct tm utc_t{};
     utc_t.tm_year = year - 1900; utc_t.tm_mon = mon - 1; utc_t.tm_mday = day;
     utc_t.tm_hour = hour; utc_t.tm_min = min; utc_t.tm_sec = sec;
-    time_t utc_ts = _mkgmtime(&utc_t);
-    if (utc_ts == -1) { snprintf(out, out_len, "-"); return; }
+    return _mkgmtime(&utc_t);
+}
+
+// ISO 8601 UTC 日時文字列を JST に変換して表示文字列に変換する
+//
+// _mkgmtime で UTC time_t を求め +9h してから gmtime_s で JST broken-down time を得る。
+// mktime（ローカル時刻解釈）を避けることで月またぎ・年またぎを正確に処理する。
+// 曜日は wchar_t 出力で日本語を正しく扱う（char + %hs 変換による文字化けを防ぐ）。
+static void format_reset_time(const std::string& iso, bool include_date, wchar_t* out, int out_len) {
+    time_t utc_ts = parse_iso8601_utc(iso);
+    if (utc_ts == -1) { swprintf_s(out, out_len, L"-"); return; }
 
     // UTC → JST (+9h)、月またぎ・年またぎも正確に処理
     time_t jst_ts = utc_ts + 9 * 3600;
     struct tm jst_t{};
     gmtime_s(&jst_t, &jst_ts);
 
-    const char* wd[] = {"日", "月", "火", "水", "木", "金", "土"};
+    const wchar_t* wd[] = {L"日", L"月", L"火", L"水", L"木", L"金", L"土"};
 
     if (include_date) {
-        snprintf(out, out_len, "%d/%d %s %02d:%02d",
-                 jst_t.tm_mon + 1, jst_t.tm_mday, wd[jst_t.tm_wday],
-                 jst_t.tm_hour, jst_t.tm_min);
+        swprintf_s(out, out_len, L"%d/%d %s %02d:%02d",
+                   jst_t.tm_mon + 1, jst_t.tm_mday, wd[jst_t.tm_wday],
+                   jst_t.tm_hour, jst_t.tm_min);
     }
     else {
-        snprintf(out, out_len, "%02d:%02d", jst_t.tm_hour, jst_t.tm_min);
+        swprintf_s(out, out_len, L"%02d:%02d", jst_t.tm_hour, jst_t.tm_min);
     }
+}
+
+// 均等消費ペースの算出（resets_at ISO 文字列とウィンドウ秒数から計算）
+//
+// 現在時刻からリセット時刻までの残り秒数を求め、
+// 経過割合（elapsed / window_secs）を 0〜100 にクランプして返す。
+// パース失敗または残り時間がウィンドウを超える場合は 0 を返す（赤色表示しない安全側）。
+static float calc_expected_pct(const std::string& iso, double window_secs) {
+    time_t resets_ts = parse_iso8601_utc(iso);
+    if (resets_ts == -1) return 0.f;
+
+    double remaining = static_cast<double>(resets_ts) - now_ts();
+    if (remaining < 0.0) remaining = 0.0;
+    if (remaining > window_secs) return 0.f;  // ウィンドウ外はペース不定
+
+    double elapsed = window_secs - remaining;
+    float expected = static_cast<float>(elapsed / window_secs * 100.0);
+    return std::clamp(expected, 0.f, 100.f);
 }
 
 static const char* BETA_HEADER = "oauth-2025-04-20";
@@ -198,12 +221,14 @@ void ClaudeCollector::do_fetch() {
         try {
             auto fh = usage_j["five_hour"];
             auto sd = usage_j["seven_day"];
-            // utilization は API から 0.0〜1.0 で返るので % に変換
-            result.five_h_pct  = static_cast<float>(fh.value("utilization", 0.0)) * 100.f;
-            result.seven_d_pct = static_cast<float>(sd.value("utilization", 0.0)) * 100.f;
+            // utilization は API から 0〜100 の % 値で返る
+            result.five_h_pct  = static_cast<float>(fh.value("utilization", 0.0));
+            result.seven_d_pct = static_cast<float>(sd.value("utilization", 0.0));
 
-            format_reset_time(fh.value("resets_at", ""), false, result.five_h_reset, sizeof(result.five_h_reset));
-            format_reset_time(sd.value("resets_at", ""), true,  result.seven_d_reset, sizeof(result.seven_d_reset));
+            format_reset_time(fh.value("resets_at", ""), false, result.five_h_reset, _countof(result.five_h_reset));
+            format_reset_time(sd.value("resets_at", ""), true,  result.seven_d_reset, _countof(result.seven_d_reset));
+            result.five_h_expected_pct  = calc_expected_pct(fh.value("resets_at", ""), 5.0 * 3600);
+            result.seven_d_expected_pct = calc_expected_pct(sd.value("resets_at", ""), 7.0 * 24 * 3600);
             result.avail = true;
         }
         catch (...) {}

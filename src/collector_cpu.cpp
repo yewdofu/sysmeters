@@ -10,10 +10,12 @@
 #include <wbemidl.h>
 #pragma comment(lib, "wbemuuid.lib")
 #pragma comment(lib, "pdh.lib")
+#include <intrin.h>
 
 #include <vector>
 #include <string>
 #include <cstdio>
+#include <cstring>
 
 // PDH カウンタ + WMI 接続の実装詳細
 struct CpuCollector::Impl {
@@ -26,6 +28,8 @@ struct CpuCollector::Impl {
     IWbemLocator*  wbem_locator  = nullptr;
     IWbemServices* wbem_services = nullptr;
     bool           wmi_ok        = false;
+
+    char cpu_name[48] = {};  // CPUID ブランド文字列
 };
 
 // 0xRRGGBB 形式の uint32_t を D2D1_COLOR_F に変換（ここでは使わないが一貫性のため保持）
@@ -55,6 +59,55 @@ bool CpuCollector::init() {
     // 最初のサンプリング（PDH は 2 回目以降が有効）
     PdhCollectQueryData(impl_->query);
 
+    // --- CPUID ブランド文字列取得（管理者権限・COM 不要）---
+    {
+        int regs[4] = {};
+        char brand[49] = {};
+        for (int leaf = 0; leaf < 3; ++leaf) {
+            __cpuid(regs, 0x80000002 + leaf);
+            memcpy(brand + leaf * 16, regs, 16);
+        }
+        brand[48] = '\0';
+
+        // 先頭空白除去
+        const char* p = brand;
+        while (*p == ' ') ++p;
+
+        // 末尾の冗長サフィックス除去（" Processor" → " N-Core" の順に除去）
+        char trimmed[49] = {};
+        strncpy_s(trimmed, sizeof(trimmed), p, _TRUNCATE);
+
+        // 末尾スペース除去（CPUID ブランド文字列は末尾にスペースが入る場合がある）
+        {
+            size_t tlen = strlen(trimmed);
+            while (tlen > 0 && trimmed[tlen - 1] == ' ') trimmed[--tlen] = '\0';
+        }
+
+        // " Processor" 除去
+        for (const char* suf : {" Processor", " processor"}) {
+            size_t tlen = strlen(trimmed);
+            size_t slen = strlen(suf);
+            if (tlen > slen && strcmp(trimmed + tlen - slen, suf) == 0) {
+                trimmed[tlen - slen] = '\0';
+            }
+        }
+
+        // " N-Core" パターン除去（" 8-Core" や " 12-Core" など）
+        {
+            const char* last_sp = strrchr(trimmed, ' ');
+            if (last_sp) {
+                // スペースの後が数字から始まり "-Core" で終わるか判定
+                const char* tok = last_sp + 1;
+                while (*tok >= '0' && *tok <= '9') ++tok;
+                if (tok > last_sp + 1 && strcmp(tok, "-Core") == 0) {
+                    trimmed[last_sp - trimmed] = '\0';
+                }
+            }
+        }
+
+        strncpy_s(impl_->cpu_name, sizeof(impl_->cpu_name), trimmed, _TRUNCATE);
+    }
+
     // --- WMI 初期化 ---
     // CoInitializeEx は main で呼ばれている前提
     HRESULT hr = CoCreateInstance(CLSID_WbemLocator, nullptr, CLSCTX_INPROC_SERVER,
@@ -83,6 +136,9 @@ bool CpuCollector::init() {
 
 void CpuCollector::update(CpuMetrics& out) {
     if (!impl_) return;
+
+    // CPU 名はキャッシュから毎回コピー
+    memcpy(out.name, impl_->cpu_name, sizeof(out.name));
 
     // PDH サンプル収集
     PdhCollectQueryData(impl_->query);

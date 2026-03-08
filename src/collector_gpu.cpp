@@ -2,6 +2,7 @@
 #include "collector_gpu.hpp"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <cstring>
 
 // NVML の最小限の型定義（nvml.h 不要）
 typedef int nvmlReturn_t;
@@ -25,6 +26,7 @@ typedef nvmlReturn_t (*PFN_nvmlDeviceGetHandleByIndex)(unsigned int, nvmlDevice_
 typedef nvmlReturn_t (*PFN_nvmlDeviceGetUtilizationRates)(nvmlDevice_t, nvmlUtilization_t*);
 typedef nvmlReturn_t (*PFN_nvmlDeviceGetTemperature)(nvmlDevice_t, unsigned int, unsigned int*);
 typedef nvmlReturn_t (*PFN_nvmlDeviceGetMemoryInfo)(nvmlDevice_t, nvmlMemory_t*);
+typedef nvmlReturn_t (*PFN_nvmlDeviceGetName)(nvmlDevice_t, char*, unsigned int);
 
 // NVML_TEMPERATURE_GPU = 0
 static constexpr unsigned int NVML_TEMPERATURE_GPU = 0;
@@ -41,6 +43,9 @@ struct GpuCollector::Impl {
     PFN_nvmlDeviceGetUtilizationRates  fn_get_util        = nullptr;
     PFN_nvmlDeviceGetTemperature       fn_get_temp        = nullptr;
     PFN_nvmlDeviceGetMemoryInfo        fn_get_mem         = nullptr;
+    PFN_nvmlDeviceGetName              fn_get_name        = nullptr;
+
+    char gpu_name[48] = {};  // NVML 取得 GPU 名
 };
 
 bool GpuCollector::init() {
@@ -64,10 +69,17 @@ bool GpuCollector::init() {
     LOAD_FN(fn_get_util,   DeviceGetUtilizationRates)
     LOAD_FN(fn_get_temp,   DeviceGetTemperature)
     LOAD_FN(fn_get_mem,    DeviceGetMemoryInfo)
+    LOAD_FN(fn_get_name,   DeviceGetName)
 #undef LOAD_FN
 
     if (impl_->fn_init() != NVML_SUCCESS) { shutdown(); return false; }
     if (impl_->fn_get_handle(0, &impl_->device) != NVML_SUCCESS) { shutdown(); return false; }
+
+    // GPU 名取得
+    char name_buf[96] = {};
+    if (impl_->fn_get_name(impl_->device, name_buf, sizeof(name_buf)) == NVML_SUCCESS) {
+        strncpy_s(impl_->gpu_name, sizeof(impl_->gpu_name), name_buf, _TRUNCATE);
+    }
 
     return true;
 }
@@ -113,6 +125,9 @@ void GpuCollector::update_all(GpuMetrics& gpu, VramMetrics& vram) {
     if (impl_->fn_get_temp(impl_->device, NVML_TEMPERATURE_GPU, &temp) == NVML_SUCCESS) {
         gpu.temp_celsius = static_cast<float>(temp);
     }
+
+    // GPU 名をメトリクスにコピー
+    memcpy(gpu.name, impl_->gpu_name, sizeof(gpu.name));
 
     nvmlMemory_t mem{};
     if (impl_->fn_get_mem(impl_->device, &mem) == NVML_SUCCESS) {
