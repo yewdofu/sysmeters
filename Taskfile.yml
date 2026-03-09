@@ -30,4 +30,5 @@ tasks:
     deps: [clean]
     cmds:
       - cmd: pwsh.exe -NoProfile -File build.ps1 -Version "{{.VERSION}}" -Config Release
-      - cmd: pwsh.exe -NoProfile -Command "Compress-Archive -Path 'out/{{.APP_NAME}}.exe','{{.APP_NAME}}.toml' -DestinationPath 'out/{{.APP_NAME}}-v{{.VERSION}}-{{.ARCH}}.zip' -Force; Write-Host 'Package: out/{{.APP_NAME}}-v{{.VERSION}}-{{.ARCH}}.zip'"
+      - cmd: pwsh.exe -NoProfile -Command "Compress-Archive -Path 'out/{{.APP_NAME}}.exe','{{.APP_NAME}}.toml' -DestinationPath 'out/{{.APP_NAME}}-v{{.VERSION}}-{{.ARCH}}.zip' -Force"
+      - cmd: echo "Package out/{{.APP_NAME}}-v{{.VERSION}}-{{.ARCH}}.zip"

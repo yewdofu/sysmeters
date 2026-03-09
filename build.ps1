@@ -36,8 +36,8 @@ $commonFlags = @(
     "/DAPP_VERSION=`"$Version`""
 )
 
-$debugFlags   = @("/Zi", "/Od", "/DDEBUG", "/MDd")
-$releaseFlags = @("/O2", "/DNDEBUG", "/MD")
+$debugFlags   = @("/Zi", "/Od", "/DDEBUG", "/MTd")
+$releaseFlags = @("/O2", "/DNDEBUG", "/MT")
 
 $configFlags = if ($Config -eq "Release") { $releaseFlags } else { $debugFlags }
 
