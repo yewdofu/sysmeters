@@ -17,6 +17,8 @@ static constexpr float LINE_H     = 30.f;   // 1行テキスト高さ（22pt 対
 static constexpr float GAP        = 6.f;    // 要素間ギャップ
 static constexpr float SECTION_GAP = 2.f;  // セクション間の追加スペース
 static constexpr float TOTAL_W    = 50.f;   // RAM/VRAM 総量テキスト幅（"64GB" 相当）
+static constexpr float DISK_GAP   = 20.f;  // Disk I/O グラフと Space バーの間ギャップ
+static constexpr float INFO_LINE_H = 27.f;  // Space 下テキスト行高さ（容量/GB/h）
 
 // リングバッファの最大値を返す
 static auto buf_max = [](const RingBuffer<float, 60>& b) {
@@ -37,7 +39,7 @@ static D2D1_COLOR_F from_rgb(uint32_t rgb, float alpha = 1.f) {
 uint32_t Renderer::temp_color(float c) {
     if (c >= 90.f) return 0xEF5350;   // 赤
     if (c >= 70.f) return 0xFFA726;   // オレンジ
-    return 0x66BB6A;                   // 緑
+    return 0x888888;                   // グレー（正常範囲）
 }
 
 bool Renderer::init(HWND hwnd, const AppConfig& cfg) {
@@ -280,7 +282,7 @@ float Renderer::draw_cpu(const CpuMetrics& m, const AppConfig& cfg, float y) {
     }
     else {
         swprintf_s(tbuf, L"--\u2103");
-        set_brush_color(brush_text_, 0x888888, 0.9f);
+        set_brush_color(brush_text_, 0x555555, 0.9f);
     }
     font_large_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
     render_target_->DrawText(tbuf, static_cast<UINT32>(wcslen(tbuf)), font_large_, ol, brush_text_);
@@ -364,12 +366,13 @@ float Renderer::draw_mem(const MemMetrics& m, const AppConfig& cfg, float y) {
     font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
     render_target_->DrawText(gbuf, static_cast<UINT32>(wcslen(gbuf)), font_small_, tr, brush_text_);
 
-    // WSL 使用量（中央、WSL 使用時のみ）
+    // WSL 使用量（RAM GB 表示と重ならないよう右端 80px を除いた矩形で右寄せ）
     if (m.wsl_gb > 0.f) {
         wchar_t wslbuf[24];
         swprintf_s(wslbuf, L"WSL %4.1fGB", m.wsl_gb);
-        font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-        render_target_->DrawText(wslbuf, static_cast<UINT32>(wcslen(wslbuf)), font_small_, tr, brush_text_);
+        D2D1_RECT_F wlr = D2D1::RectF(x, y, x + ww - 80.f, y + LINE_H);
+        font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+        render_target_->DrawText(wslbuf, static_cast<UINT32>(wcslen(wslbuf)), font_small_, wlr, brush_text_);
     }
 
     font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
@@ -386,7 +389,7 @@ float Renderer::draw_mem(const MemMetrics& m, const AppConfig& cfg, float y) {
         float wsl_fill = min(m.wsl_gb / m.total_gb, 1.f) * bar_w;
         if (wsl_fill > 0.f) {
             D2D1_RECT_F wr = D2D1::RectF(br.left, br.top, br.left + wsl_fill, br.bottom);
-            set_brush_color(brush_fill_, 0xFFFFFF, 0.25f);
+            set_brush_color(brush_fill_, 0xCC6B3A, 0.7f);
             render_target_->FillRectangle(wr, brush_fill_);
         }
     }
@@ -451,35 +454,99 @@ float Renderer::draw_vram(const VramMetrics& m, const AppConfig& cfg, float y) {
     return y;
 }
 
-float Renderer::draw_disk(const DiskMetrics& c, const DiskMetrics& d, const AppConfig& cfg, float y) {
+float Renderer::draw_disk(const DiskMetrics& c, const DiskMetrics& d,
+                           const AppConfig& cfg, float y) {
     float x  = PAD;
     float ww = static_cast<float>(cfg.win_width) - PAD * 2;
-    static constexpr float DISK_GAP = 20.f;  // ドライブ間ギャップ
-    float hw = (ww - DISK_GAP) / 2.f;
+    float sw = (ww - DISK_GAP) / 3.f;  // 右：Space 列幅（1/3）
+    float gw = ww - DISK_GAP - sw;     // 左：I/O グラフ幅（2/3）
 
-    draw_section_label(x, y, L"Disk I/O", cfg);
-    y += SECTION_H;
+    set_brush_color(brush_text_, cfg.col_text);
+    render_target_->DrawText(L"Disk", 4, font_normal_,
+        D2D1::RectF(x, y, x + ww, y + LINE_H), brush_text_);
+    y += LINE_H;
 
-    auto draw_drive = [&](const DiskMetrics& dm, float bx) {
-        // R/W を同一行に表示
+    // ドライブ 1 行分（I/O 面グラフ＋Space 横バー＋S.M.A.R.T. を横並びで描画）
+    // prev: 前のドライブ（C: は nullptr）。同一物理ドライブなら SMART 行を省略する
+    auto draw_drive = [&](const DiskMetrics& dm, const DiskMetrics* prev) {
+        // --- 左 2/3：I/O ---
         wchar_t buf[64];
         swprintf_s(buf, L"%c: R %.1f  W %.1f MB/s", dm.drive, dm.read_mbps, dm.write_mbps);
         set_brush_color(brush_text_, cfg.col_text);
-        D2D1_RECT_F tr = D2D1::RectF(bx, y, bx + hw, y + LINE_H);
+        D2D1_RECT_F tr = D2D1::RectF(x, y, x + gw, y + LINE_H);
         render_target_->DrawText(buf, static_cast<UINT32>(wcslen(buf)), font_small_, tr, brush_text_);
-        D2D1_RECT_F gr = D2D1::RectF(bx, y + LINE_H, bx + hw, y + LINE_H + GRAPH_H);
 
-        // Read/Write の最大値でスケーリング（動的スケール）
         float max_val = max(1.f, max(buf_max(dm.read_history), buf_max(dm.write_history)));
-
+        D2D1_RECT_F gr = D2D1::RectF(x, y + LINE_H, x + gw, y + LINE_H + GRAPH_H);
         draw_area_graph(dm.read_history,  max_val, gr, cfg.col_disk_read);
         draw_area_graph(dm.write_history, max_val, gr, cfg.col_disk_write);
+
+        // NVMe 温度（グラフ右上オーバーレイ、SMART 有効時のみ）
+        if (dm.smart_avail) {
+            wchar_t tbuf[16];
+            swprintf_s(tbuf, L"%3.0f\u2103", dm.smart_temp_celsius);
+            set_brush_color(brush_text_, temp_color(dm.smart_temp_celsius), 0.9f);
+            font_large_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+            D2D1_RECT_F ol = D2D1::RectF(x + 4.f, y + LINE_H + 4.f, x + gw - 4.f, y + LINE_H + GRAPH_H - 4.f);
+            render_target_->DrawText(tbuf, static_cast<UINT32>(wcslen(tbuf)), font_large_, ol, brush_text_);
+            font_large_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        }
+
+        // --- 右 1/3：Space（テキスト + バー + 容量テキスト縦積み）---
+        float sx = x + gw + DISK_GAP;
+        uint32_t sp_col = (dm.used_pct > 90.f) ? 0xEF5350 : cfg.col_text;
+
+        // テキスト行（"Used" 左寄せ + パーセンテージ右寄せ）
+        set_brush_color(brush_text_, sp_col);
+        D2D1_RECT_F str = D2D1::RectF(sx, y, sx + sw, y + LINE_H);
+        render_target_->DrawText(L"Used", 4, font_small_, str, brush_text_);
+        wchar_t sbuf[16];
+        swprintf_s(sbuf, L"%5.1f%%", dm.used_pct);
+        font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+        render_target_->DrawText(sbuf, static_cast<UINT32>(wcslen(sbuf)), font_small_, str, brush_text_);
+        font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+
+        // バー（LINE_H の下から BAR_H 分）
+        uint32_t bar_col = (dm.used_pct > 90.f) ? 0xEF5350 : cfg.col_graph_fill;
+        D2D1_RECT_F br = D2D1::RectF(sx, y + LINE_H + 2.f, sx + sw, y + LINE_H + 2.f + BAR_H);
+        draw_hbar(dm.used_pct, 100.f, br, bar_col);
+
+        // 容量テキスト（バーの下、右寄せ）
+        wchar_t gbuf[32];
+        if (dm.total_gb > 0.f) {
+            swprintf_s(gbuf, L"%.0f/%.0fGB", dm.used_gb, dm.total_gb);
+        }
+        else {
+            wcscpy_s(gbuf, L"-");
+        }
+        set_brush_color(brush_text_, cfg.col_text, 0.5f);
+        font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+        float gt = y + LINE_H + 2.f + BAR_H;
+        D2D1_RECT_F gbr = D2D1::RectF(sx, gt, sx + sw, gt + INFO_LINE_H);
+        render_target_->DrawText(gbuf, static_cast<UINT32>(wcslen(gbuf)), font_small_, gbr, brush_text_);
+        font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+
+        // GB/h 行（容量テキストの下、同一物理ドライブの後続は省略）
+        bool show_smart = dm.smart_avail
+                       && (!prev || prev->phys_drive != dm.phys_drive);
+        if (show_smart) {
+            wchar_t smuf[32];
+            swprintf_s(smuf, L"%.1f GB/h", dm.smart_write_gbh);
+            set_brush_color(brush_text_, cfg.col_text, 0.45f);
+            font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+            float st = gt + INFO_LINE_H;
+            D2D1_RECT_F smr = D2D1::RectF(sx, st, sx + sw, st + INFO_LINE_H);
+            render_target_->DrawText(smuf, static_cast<UINT32>(wcslen(smuf)), font_small_, smr, brush_text_);
+            font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        }
     };
 
-    draw_drive(c, x);
-    draw_drive(d, x + hw + DISK_GAP);
-
+    draw_drive(c, nullptr);
     y += LINE_H + GRAPH_H + GAP;
+
+    draw_drive(d, &c);
+    y += LINE_H + GRAPH_H + GAP;
+
     return y;
 }
 
@@ -487,8 +554,10 @@ float Renderer::draw_net(const NetMetrics& m, const AppConfig& cfg, float y) {
     float x  = PAD;
     float ww = static_cast<float>(cfg.win_width) - PAD * 2;
 
-    draw_section_label(x, y, L"Network", cfg);
-    y += SECTION_H;
+    set_brush_color(brush_text_, cfg.col_text);
+    render_target_->DrawText(L"Network", 7, font_normal_,
+        D2D1::RectF(x, y, x + ww, y + LINE_H), brush_text_);
+    y += LINE_H;
 
     // 3 桁左スペースパディングで表示のガタつきを防ぐ
     auto fmt_kbps = [](float kbps, wchar_t* buf, int len) {
@@ -570,7 +639,7 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         if (avail) {
             wchar_t rtbuf[40];
             swprintf_s(rtbuf, L"%.38s", reset);
-            set_brush_color(brush_text_, cfg.col_text, 0.6f);
+            set_brush_color(brush_text_, cfg.col_text, 1.0f);
             D2D1_RECT_F rr = D2D1::RectF(x + ww - RESET_W, y, x + ww, y + SECTION_H);
             font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
             render_target_->DrawText(rtbuf, static_cast<UINT32>(wcslen(rtbuf)), font_small_, rr, brush_text_);

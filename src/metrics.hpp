@@ -40,13 +40,22 @@ struct VramMetrics {
     bool  avail     = false;
 };
 
-// Disk I/O：Read/Write 分離の面グラフ
+// Disk：I/O（Read/Write 面グラフ）+ 空き容量（横バー）+ S.M.A.R.T.
 struct DiskMetrics {
     RingBuffer<float, 60> read_history;  // Read MB/s
     RingBuffer<float, 60> write_history; // Write MB/s
     float read_mbps  = 0.f;
     float write_mbps = 0.f;
     char  drive      = 'C';
+    // ディスク空き容量（10 分間隔で更新）
+    float used_pct   = 0.f;  // 使用率（0〜100%）
+    float used_gb    = 0.f;  // 使用量（GB）
+    float total_gb   = 0.f;  // 総容量（GB）
+    // NVMe S.M.A.R.T.（1 時間間隔で更新）
+    int   phys_drive      = -1;    // 物理ドライブ番号（init 時に解決）
+    float smart_write_gbh    = 0.f;  // 時間あたり書き込み量（GB/h）
+    float smart_temp_celsius = 0.f;  // NVMe コンポジット温度（°C）
+    bool  smart_avail     = false;
 };
 
 // Network：送受信分離の面グラフ
@@ -76,8 +85,8 @@ struct AllMetrics {
     GpuMetrics  gpu;
     MemMetrics  mem;
     VramMetrics vram;
-    DiskMetrics disk_c;
-    DiskMetrics disk_d;
-    NetMetrics  net;
+    DiskMetrics      disk_c;
+    DiskMetrics      disk_d;
+    NetMetrics       net;
     ClaudeMetrics claude;
 };

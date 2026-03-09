@@ -18,14 +18,18 @@
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "dwmapi.lib")
 
-static constexpr int TIMER_CPU     = 1;     // CPU 専用タイマー ID
-static constexpr int TIMER_FAST    = 2;     // 高速タイマー ID（GPU/Disk/Net）
-static constexpr int TIMER_SLOW    = 3;     // 低速タイマー ID（RAM/VRAM）
-static constexpr int TIMER_CLAUDE  = 4;     // Claude 専用タイマー ID（5h/7d 更新）
-static constexpr int TIMER_CPU_MS    = 1000;   // 1.0 秒
-static constexpr int TIMER_FAST_MS   = 1100;   // 1.1 秒
-static constexpr int TIMER_SLOW_MS   = 5000;   // 5.0 秒
-static constexpr int TIMER_CLAUDE_MS = 60000;  // 60 秒
+static constexpr int TIMER_CPU        = 1;  // CPU 専用タイマー ID
+static constexpr int TIMER_FAST       = 2;  // 高速タイマー ID（GPU/Disk/Net）
+static constexpr int TIMER_SLOW       = 3;  // 低速タイマー ID（RAM/VRAM）
+static constexpr int TIMER_CLAUDE     = 4;  // Claude 専用タイマー ID（5h/7d 更新）
+static constexpr int TIMER_DISK_SPACE = 5;  // Disk 空き容量タイマー ID（10 分更新）
+static constexpr int TIMER_SMART      = 6;  // NVMe S.M.A.R.T. タイマー ID（1 時間更新）
+static constexpr int TIMER_CPU_MS         = 1000;      // 1.0 秒
+static constexpr int TIMER_FAST_MS        = 1100;      // 1.1 秒
+static constexpr int TIMER_SLOW_MS        = 5000;      // 5.0 秒
+static constexpr int TIMER_CLAUDE_MS      = 60000;     // 60 秒
+static constexpr int TIMER_DISK_SPACE_MS  = 600000;    // 10 分
+static constexpr int TIMER_SMART_MS       = 3600000;   // 1 時間
 static constexpr int MIN_CLIENT_W = 450;  // 水平リサイズの最低クライアント幅（px）
 
 // ウィンドウスタイル定数（WM_GETMINMAXINFO でも参照するため定数化）
@@ -110,10 +114,12 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     add_tray_icon();
 
     // タイマー開始
-    SetTimer(hwnd_, TIMER_CPU,    TIMER_CPU_MS,    nullptr);
-    SetTimer(hwnd_, TIMER_FAST,   TIMER_FAST_MS,   nullptr);
-    SetTimer(hwnd_, TIMER_SLOW,   TIMER_SLOW_MS,   nullptr);
-    SetTimer(hwnd_, TIMER_CLAUDE, TIMER_CLAUDE_MS, nullptr);
+    SetTimer(hwnd_, TIMER_CPU,        TIMER_CPU_MS,        nullptr);
+    SetTimer(hwnd_, TIMER_FAST,       TIMER_FAST_MS,       nullptr);
+    SetTimer(hwnd_, TIMER_SLOW,       TIMER_SLOW_MS,       nullptr);
+    SetTimer(hwnd_, TIMER_CLAUDE,     TIMER_CLAUDE_MS,     nullptr);
+    SetTimer(hwnd_, TIMER_DISK_SPACE, TIMER_DISK_SPACE_MS, nullptr);
+    SetTimer(hwnd_, TIMER_SMART,      TIMER_SMART_MS,      nullptr);
 
     // WM_GETMINMAXINFO 用の最小ウィンドウ幅を事前計算
     {
@@ -127,6 +133,8 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     col_gpu_->update_all(metrics_->gpu, metrics_->vram);
     col_mem_->update(metrics_->mem);
     col_disk_->update(metrics_->disk_c, metrics_->disk_d);
+    col_disk_->update_space(metrics_->disk_c, metrics_->disk_d);
+    col_disk_->update_smart(metrics_->disk_c, metrics_->disk_d);
     col_net_->update(metrics_->net);
     col_claude_->update(metrics_->claude);
     update_window_size();
@@ -225,6 +233,8 @@ void AppWindow::destroy() {
     KillTimer(hwnd_, TIMER_FAST);
     KillTimer(hwnd_, TIMER_SLOW);
     KillTimer(hwnd_, TIMER_CLAUDE);
+    KillTimer(hwnd_, TIMER_DISK_SPACE);
+    KillTimer(hwnd_, TIMER_SMART);
     remove_tray_icon();
 
     if (col_cpu_)    { col_cpu_->shutdown();    delete col_cpu_;    }
@@ -264,6 +274,14 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         else if (wp == TIMER_CLAUDE) {
             // Claude 更新（60 秒）：5h/7d レートリミット
             col_claude_->update(metrics_->claude);
+        }
+        else if (wp == TIMER_DISK_SPACE) {
+            // Disk 空き容量更新（10 分）
+            col_disk_->update_space(metrics_->disk_c, metrics_->disk_d);
+        }
+        else if (wp == TIMER_SMART) {
+            // NVMe S.M.A.R.T. 更新（1 時間）
+            col_disk_->update_smart(metrics_->disk_c, metrics_->disk_d);
         }
         update_window_size();
         InvalidateRect(hwnd, nullptr, FALSE);

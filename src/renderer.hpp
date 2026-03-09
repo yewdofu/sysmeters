@@ -77,7 +77,8 @@ private:
     float draw_gpu(const GpuMetrics& m, const AppConfig& cfg, float y);
     float draw_mem(const MemMetrics& m,  const AppConfig& cfg, float y);
     float draw_vram(const VramMetrics& m, const AppConfig& cfg, float y);
-    float draw_disk(const DiskMetrics& c, const DiskMetrics& d, const AppConfig& cfg, float y);
+    float draw_disk(const DiskMetrics& c, const DiskMetrics& d,
+                    const AppConfig& cfg, float y);
     float draw_net(const NetMetrics& m,  const AppConfig& cfg, float y);
     float draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float y);
 };
