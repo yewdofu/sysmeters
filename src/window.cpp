@@ -30,6 +30,37 @@ namespace fs = std::filesystem;
 // GitHub リポジトリ URL
 static constexpr LPCWSTR GITHUB_URL = L"https://github.com/aviscaerulea/sysmeters";
 
+// フルスクリーン D3D アプリ実行中、またはフォアグラウンドプロセスが silent_processes リストに
+// 一致する場合に true を返す（警告音・Toast 抑制判定）
+static bool is_silent_mode(const AppConfig& cfg) {
+    QUERY_USER_NOTIFICATION_STATE quns = QUNS_ACCEPTS_NOTIFICATIONS;
+    SHQueryUserNotificationState(&quns);
+    if (quns == QUNS_RUNNING_D3D_FULL_SCREEN) return true;
+
+    if (cfg.silent_processes.empty()) return false;
+
+    HWND fg = GetForegroundWindow();
+    if (!fg) return false;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(fg, &pid);
+    if (!pid) return false;
+    HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!hProc) return false;
+
+    wchar_t path[MAX_PATH] = {};
+    DWORD size = MAX_PATH;
+    bool found = false;
+    if (QueryFullProcessImageNameW(hProc, 0, path, &size)) {
+        const wchar_t* fname = wcsrchr(path, L'\\');
+        fname = fname ? fname + 1 : path;
+        for (const auto& p : cfg.silent_processes) {
+            if (_wcsicmp(fname, p.c_str()) == 0) { found = true; break; }
+        }
+    }
+    CloseHandle(hProc);
+    return found;
+}
+
 static constexpr int TIMER_CPU        = 1;  // CPU/GPU タイマー ID（0.9 秒）
 static constexpr int TIMER_FAST       = 2;  // 高速タイマー ID（Disk/Net）
 static constexpr int TIMER_SLOW       = 3;  // 低速タイマー ID（RAM/VRAM、2 秒）
@@ -772,8 +803,9 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         if (alert_) {
-            uint32_t fired = alert_->check(*metrics_, *cfg_);
-            if (fired && toast_alert_) show_balloon(fired);
+            bool gaming = is_silent_mode(*cfg_);
+            uint32_t fired = alert_->check(*metrics_, *cfg_, gaming);
+            if (fired && toast_alert_ && !gaming) show_balloon(fired);
         }
         update_window_size();
         InvalidateRect(hwnd, nullptr, FALSE);

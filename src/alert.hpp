@@ -38,7 +38,8 @@ public:
     //
     // 戻り値: 新規発火した Id のビットが立った uint32_t（0 = 発火なし）。
     // 警告音・Toast の発行は window 側が戻り値を見て行う。
-    uint32_t check(const AllMetrics& m, const AppConfig& cfg);
+    // gaming = true のとき警告音を抑制する（Toast 抑制は呼び出し側が行う）。
+    uint32_t check(const AllMetrics& m, const AppConfig& cfg, bool gaming = false);
 
 private:
     // CPU/GPU 警告判定に使う平均サンプル数（直近 10 サンプル ≒ 約 9 秒）

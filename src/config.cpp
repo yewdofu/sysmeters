@@ -113,6 +113,13 @@ AppConfig load_config(const std::string& path) {
         // szInfoTitle は 64 wchar、szInfo は 256 wchar が上限
         if (cfg.notify_peak_limit_title.size() > 63) cfg.notify_peak_limit_title.resize(63);
         if (cfg.notify_peak_limit_body.size()  > 255) cfg.notify_peak_limit_body.resize(255);
+
+        try {
+            auto procs = toml::find<std::vector<std::string>>(data, "silent_mode", "processes");
+            for (const auto& p : procs)
+                cfg.silent_processes.emplace_back(p.begin(), p.end());
+        }
+        catch (...) {}
     }
     catch (...) {
         cfg.config_error = "TOML parse failed: " + path;

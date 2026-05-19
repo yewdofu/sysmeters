@@ -2,6 +2,7 @@
 #pragma once
 #include <cstdint>
 #include <string>
+#include <vector>
 
 // アプリケーション設定（TOML から読み込む）
 struct AppConfig {
@@ -66,6 +67,9 @@ struct AppConfig {
     int  priority_check_interval_sec = 5;      // 隠蔽率チェック周期（秒）
     int  priority_visible_range_pct  = 20;     // 隠蔽率がこれ未満で ABOVE_NORMAL（可視判定範囲幅、%）
     int  priority_hidden_range_pct   = 20;     // 隠蔽率が 100 - これ以上で BELOW_NORMAL（隠蔽判定範囲幅、%）
+
+    // サイレントモード：フォアグラウンドのプロセス名がリストに一致する間、警告音・Toast を抑制する
+    std::vector<std::wstring> silent_processes;
 
     // ログ出力先ディレクトリ（実行ファイルからの相対パス、または絶対パス）
     std::string log_dir = "logs";
